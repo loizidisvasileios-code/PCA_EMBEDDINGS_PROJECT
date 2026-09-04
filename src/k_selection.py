@@ -19,13 +19,14 @@ from sklearn.cluster import AgglomerativeClustering, KMeans
 # silhouette_score is our label-free way to judge a clustering's quality:
 # how much closer, on average, is each point to its own cluster than to the
 # next-nearest one. Works without ever touching ground-truth labels.
-# pairwise_distances builds the n x n cosine distance matrix Agglomerative
-# needs (see sweep_agglomerative_k for why: it cannot take sparse input).
-from sklearn.metrics import pairwise_distances, silhouette_score
+from sklearn.metrics import silhouette_score
 
 # l2_normalize makes Euclidean distance behave like cosine distance -- see
 # utils.py and our conversation for why that matters for text embeddings.
-from utils import l2_normalize
+# cosine_distance_matrix builds the n x n distance matrix Agglomerative needs
+# (see sweep_agglomerative_k for why: it cannot take sparse input) -- shared
+# with clustering.py so both stages use the exact same distances.
+from utils import cosine_distance_matrix, l2_normalize
 
 
 def sweep_kmeans_k(embeddings, k_range=range(2, 21), seed: int = 42) -> pd.DataFrame:
@@ -81,9 +82,9 @@ def sweep_agglomerative_k(embeddings, k_range=range(2, 21), linkage: str = "aver
     distance computation happens once per sweep, not once per k.
     """
     # cosine distance is scale-invariant, so this does not need l2_normalize
-    # first; pairwise_distances also accepts sparse input directly, so the
-    # original (potentially sparse) embeddings never get densified.
-    distance_matrix = pairwise_distances(embeddings, metric="cosine")
+    # first; cosine_distance_matrix also accepts sparse input directly, so
+    # the original (potentially sparse) embeddings never get densified.
+    distance_matrix = cosine_distance_matrix(embeddings)
 
     rows = []
     for k in k_range:
