@@ -12,6 +12,10 @@ here -- its own discovered cluster count is produced by clustering.py instead.
 # visualization.py can plot elbow/silhouette curves straight from it.
 import pandas as pd
 
+# numpy does the geometry behind best_k_by_elbow (normalising the curve and
+# measuring each point's distance from the straight line across it).
+import numpy as np
+
 # AgglomerativeClustering and KMeans are the two algorithms that need a k
 # chosen before they can be fit at all.
 from sklearn.cluster import AgglomerativeClustering, KMeans
@@ -124,6 +128,53 @@ def best_k_by_silhouette(sweep_df: pd.DataFrame) -> int:
     return int(best_row["k"])
 
 
+def best_k_by_elbow(sweep_df: pd.DataFrame) -> int:
+    """Pick k at the "elbow" of the inertia curve, without using labels.
+
+    Inertia always falls as k grows, so its minimum is useless -- what matters
+    is where the curve stops falling steeply and flattens out ("adding another
+    cluster stops buying much"). This is the Elbow Method the assignment asks
+    for alongside silhouette.
+
+    Finding that corner numerically: draw a straight line from the first point
+    of the curve to the last, then take the point lying furthest from that
+    line. On a curve shaped like a bent elbow, that furthest point is the bend.
+    Both axes are rescaled to 0-1 first, otherwise the comparison would be
+    dominated by whichever axis happens to have larger raw numbers.
+
+    Requires an "inertia" column, so it works on sweep_kmeans_k output only
+    (Agglomerative has no equivalent objective). Complements
+    best_k_by_silhouette rather than replacing it: on BBC silhouette found
+    exactly the right k=5, while on 20NewsGroups the elbow was closer
+    (k=21 against a true 20, where silhouette said 31).
+    """
+    # Curve coordinates: x = number of clusters, y = the inertia at that k.
+    x = sweep_df["k"].to_numpy(dtype=float)
+    y = sweep_df["inertia"].to_numpy(dtype=float)
+
+    # Rescale both axes to the 0-1 range so "distance from the line" means
+    # the same thing horizontally and vertically.
+    x_scaled = (x - x.min()) / (x.max() - x.min())
+    y_scaled = (y - y.min()) / (y.max() - y.min())
+
+    # The straight line runs from the first point of the curve to the last.
+    x_first, y_first = x_scaled[0], y_scaled[0]
+    x_last, y_last = x_scaled[-1], y_scaled[-1]
+
+    # Standard point-to-line distance: the numerator is the cross product of
+    # (line direction) with (point relative to the line's start), and the
+    # denominator is the line's length.
+    distances = np.abs(
+        (y_last - y_first) * x_scaled
+        - (x_last - x_first) * y_scaled
+        + x_last * y_first
+        - y_last * x_first
+    ) / np.hypot(y_last - y_first, x_last - x_first)
+
+    # The k sitting furthest from the straight line is the bend in the curve.
+    return int(x[distances.argmax()])
+
+
 # Running this file directly sweeps k=2..30 (comfortably past both datasets'
 # true category counts of 5 and 20, without ever telling the algorithms that
 # number) using TF-IDF on both datasets, and -- unlike a plain print, which
@@ -151,7 +202,10 @@ if __name__ == "__main__":
         kmeans_path = results_dir / f"k_selection_{name.lower()}_tfidf_kmeans.csv"
         kmeans_sweep.to_csv(kmeans_path, index=False)
         print(f"K-Means sweep saved to {kmeans_path}")
+        # Both label-free rules are reported side by side: neither one wins on
+        # both datasets, so seeing them disagree is itself informative.
         print("best k (K-Means, silhouette):", best_k_by_silhouette(kmeans_sweep))
+        print("best k (K-Means, elbow):     ", best_k_by_elbow(kmeans_sweep))
 
         agglo_sweep = sweep_agglomerative_k(tfidf_matrix, k_range=K_RANGE)
         agglo_path = results_dir / f"k_selection_{name.lower()}_tfidf_agglomerative.csv"

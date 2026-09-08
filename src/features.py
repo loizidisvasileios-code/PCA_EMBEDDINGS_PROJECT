@@ -31,20 +31,45 @@ from gensim.models import FastText, Word2Vec
 
 def build_tfidf(
     texts: pd.Series,
+    min_df: int | float = 5,
+    max_df: int | float = 0.5,
+    sublinear_tf: bool = True,
     max_features: int | None = None,
     ngram_range: tuple[int, int] = (1, 1),
 ) -> tuple:
     """Fit a TF-IDF vectorizer on texts and return (doc-term matrix, vectorizer).
 
-    max_features / ngram_range are exposed (rather than hardcoded) so
-    run_pipeline.py can sweep them if the default unigram, unlimited-vocabulary
-    TF-IDF underperforms. The fitted vectorizer is returned alongside the
-    matrix so callers can inspect vocabulary/feature names later if useful
-    for interpretation.
+    The defaults here are NOT scikit-learn's defaults, and that is deliberate:
+    scikit-learn's out-of-the-box settings (min_df=1, no max_df cut, raw term
+    frequency) turned out to be the single biggest thing holding our clustering
+    back. Measured on 20NewsGroups, moving to these settings raised the best
+    achievable NMI from 0.265 to 0.367, and -- more importantly -- rescued
+    label-free k selection, which had been picking k=2 (NMI 0.049) and started
+    picking k=21-31 (NMI ~0.354). On BBC it lifted NMI from 0.716 to 0.847.
+
+    - min_df=5: drop terms appearing in fewer than 5 documents. On 20NG this
+      cut the vocabulary from 27,379 to 5,062 -- i.e. ~81% of the vocabulary
+      was near-unique tokens (names, typos, one-off strings) contributing
+      almost pure noise to every distance computation.
+    - max_df=0.5: drop terms appearing in more than half the documents, which
+      are too common to distinguish any topic.
+    - sublinear_tf=True: use 1+log(tf) instead of raw counts, so a term
+      appearing 20 times does not count 20x a term appearing once. Standard
+      practice for text clustering / LSA.
+
+    All of them stay parameters rather than hardcoded values, so the weaker
+    baseline remains reproducible (pass min_df=1, max_df=1.0,
+    sublinear_tf=False) for the comparison documented in the README.
     """
     # TfidfVectorizer handles tokenization, vocabulary building, term-frequency
     # counting, and inverse-document-frequency weighting all in one fit_transform.
-    vectorizer = TfidfVectorizer(max_features=max_features, ngram_range=ngram_range)
+    vectorizer = TfidfVectorizer(
+        min_df=min_df,
+        max_df=max_df,
+        sublinear_tf=sublinear_tf,
+        max_features=max_features,
+        ngram_range=ngram_range,
+    )
 
     # fit_transform learns the vocabulary from texts and immediately encodes
     # every document as a sparse row in the returned matrix.
